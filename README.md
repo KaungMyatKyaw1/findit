@@ -10,7 +10,7 @@ A Flask web app that searches Amazon and streams product results (name, price, i
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/KaungMyatKyaw1/bs4_scraper.git
+git clone https://github.com/KaungMyatKyaw1/findit.git
 cd bs4_scraper
 
 # 2. Create and activate a virtual environment
