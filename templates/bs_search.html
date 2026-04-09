@@ -753,6 +753,9 @@
         {% for item in page_products %}
         {% set gi = loop.index0 % 12 %}
         {% set abs_link = item.link if (item.link and item.link.startswith('http')) else ('https://www.amazon.com' + item.link if item.link else '#') %}
+        {% if abs_link != '#' %}
+          {% set abs_link = abs_link + ('&' if '?' in abs_link else '?') + 'tag=findit0f3-20' %}
+        {% endif %}
         <a href="{{ abs_link }}" target="_blank" rel="noopener" class="product-card">
 
             <div class="card-img {% if not item.image %}g{{ gi }}{% endif %}">
