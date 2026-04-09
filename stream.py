@@ -1,10 +1,10 @@
 """
 stream.py — Server-Sent Events (SSE) streaming logic.
 
-Two functions:
+Functions:
   empty_response()         — SSE payload for a missing/empty query
   generate(query, cached)  — yields SSE events, one product at a time,
-                             fetching Amazon (3 pages) in parallel
+                             fetching Amazon (up to 20 pages) in parallel batches
 """
 
 import json
@@ -13,10 +13,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import scraper
 import cache
 
+MAX_PAGES = 20
+BATCH_SIZE = 5
+
+
+def _sse(payload: dict) -> str:
+    return f'data: {json.dumps(payload)}\n\n'
+
+
+def _fetch_page(url: str) -> list[dict]:
+    html = scraper.fetch_page(url)
+    products = scraper.parse_products(html) if html else []
+    for p in products:
+        p["source"] = "Amazon"
+    return products
+
+
+def _page_urls(base_url: str, pages: range) -> list[str]:
+    return [
+        base_url if page == 1 else f"{base_url}&page={page}"
+        for page in pages
+    ]
+
 
 def empty_response() -> str:
-    """Return a single SSE 'done' event with zero results."""
-    return f'data: {json.dumps({"type": "done", "total": 0})}\n\n'
+    return _sse({"type": "done", "total": 0})
 
 
 def generate(query: str, cached: list | None):
@@ -26,47 +47,43 @@ def generate(query: str, cached: list | None):
         Streams every product instantly, then sends a 'done' event.
 
     Slow path — nothing cached yet:
-        Fetches Amazon (3 pages) simultaneously using threads.
-        Each batch is streamed to the browser as soon as that fetch
-        finishes. The combined result is saved to cache when all done.
+        Fetches Amazon (up to 20 pages) in parallel batches of 5.
+        Each batch streams to the browser as soon as it finishes.
+        Stops early if a batch returns no products.
 
     Event shapes:
         {"type": "product", "item": {...}}  — one product
         {"type": "done",    "total": N}     — signals end of stream
     """
-    # ── Fast path ──────────────────────────────────────────────────────────
     if cached is not None:
         for product in cached:
-            yield f'data: {json.dumps({"type": "product", "item": product})}\n\n'
-        yield f'data: {json.dumps({"type": "done", "total": len(cached)})}\n\n'
+            yield _sse({"type": "product", "item": product})
+        yield _sse({"type": "done", "total": len(cached)})
         return
 
-    # ── Slow path: fetch Amazon in parallel ──────────────────────────────────
-    amazon_base = scraper.build_search_url(query)
-
-    urls = [
-        amazon_base,
-        f"{amazon_base}&page=2",
-        f"{amazon_base}&page=3",
-    ]
-
+    base_url = scraper.build_search_url(query)
     all_products = []
 
-    def fetch_and_parse(url):
-        html = scraper.fetch_page(url)
-        return scraper.parse_products(html) if html else []
+    for batch_start in range(1, MAX_PAGES + 1, BATCH_SIZE):
+        pages = range(batch_start, min(batch_start + BATCH_SIZE, MAX_PAGES + 1))
+        urls = _page_urls(base_url, pages)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_and_parse, url): url for url in urls}
-        for future in as_completed(futures):
-            batch = future.result()
-            for product in batch:
-                product["source"] = "Amazon"
-            all_products.extend(batch)
-            print(f"[stream] Amazon batch: {len(batch)} products")
-            for product in batch:
-                yield f'data: {json.dumps({"type": "product", "item": product})}\n\n'
+        batch_products = []
+        with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+            futures = {executor.submit(_fetch_page, url): url for url in urls}
+            for future in as_completed(futures):
+                products = future.result()
+                batch_products.extend(products)
+                print(f"[stream] batch: {len(products)} products")
+                for product in products:
+                    yield _sse({"type": "product", "item": product})
 
-    print(f"[stream] Total: {len(all_products)} products")
+        all_products.extend(batch_products)
+
+        if not batch_products:
+            print(f"[stream] pages {list(pages)} empty, stopping.")
+            break
+
+    print(f"[stream] total: {len(all_products)} products")
     cache.set(query, all_products)
-    yield f'data: {json.dumps({"type": "done", "total": len(all_products)})}\n\n'
+    yield _sse({"type": "done", "total": len(all_products)})
