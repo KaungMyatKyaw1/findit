@@ -45,14 +45,19 @@ gcloud run deploy findit-hub --source . --region us-central1 --allow-unauthentic
 
 ```
 findit/
-  app.py          — Flask routes
-  scraper.py      — Fetching and parsing Amazon HTML
-  stream.py       — Server-Sent Events generator (up to 20 pages, batches of 5)
-  cache.py        — In-memory result cache (1 hour expiry)
-  params.py       — URL query parameter parsing
-  Dockerfile      — Container config for Cloud Run
+  app.py               — Flask routes
+  scraper.py           — Fetching and parsing Amazon HTML
+  stream.py            — SSE generator (up to 20 pages, batches of 5)
+  cache.py             — In-memory result cache (1 hour expiry)
+  params.py            — URL query parameter parsing
+  requirements.txt     — Python dependencies
+  Dockerfile           — Container config for Cloud Run
   templates/
-    bs_search.html — UI
+    bs_search.html     — UI template
+  static/
+    css/style.css      — Styles
+    js/stream.js       — SSE client logic
+    js/cached.js       — Fallback for cached results
 ```
 
 ## Notes
